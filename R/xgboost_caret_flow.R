@@ -21,6 +21,8 @@
 #'    the threshold.
 #' @param figDir if not `NULL`, diagnostic tuning plots will be saved to this directory.
 #' @param cachePath directory to cache results - likely cachePath(sim) if running inside a simulation
+#' @param nthreads number of CPU threads used by `xgboost`, both when tuning (via `caret`) and when fitting.
+#'    `NULL` or `NA` uses `.defaultThreads()`, which leaves cores free for other users.
 #'
 #' @return a list (one entry per fold) of lists with:
 #'   * `$mod`: fitted model
@@ -36,13 +38,16 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                        eval_metric = c("auc", "rmse", "logloss"),
                        objective = NULL, interaction_constraints = NULL, SHAPthresh = 0,
                        figDir = NULL, 
-                       cachePath = NULL) {
+                       cachePath = NULL, nthreads = NULL) {
+
+  nthreads <- .resolveThreads(nthreads)
 
   # Add dummy variables for factor columns -- i.e., the random effects
   if (all(sapply(dat, is.numeric)) %in% FALSE)
     dat <- model.matrix(~ . + 0, data = dat) |>
       Cache(cachePath = cachePath, omitArgs = c("object", "data", "x"),
-            .cacheExtra = dig) # Creates dummy variables
+            .cacheExtra = dig,
+            userTags = c("gmcsDataPrep", "xgboostFit", "modelMatrix")) # Creates dummy variables
   
   dat <- as.data.table(dat)
   
@@ -89,8 +94,11 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                          dat[, .SD, .SDcols = c(colnamesPred, colnamesResp)],
                          colnamesResp = colnamesResp,
                          figDir, 
-                         cachePath = cachePath) |>
-    Cache(cachePath = cachePath)
+                         cachePath = cachePath,
+                         nthreads = nthreads) |>
+    # nthreads does not change the result, so it should not invalidate the cache
+    Cache(cachePath = cachePath, userTags = c("gmcsDataPrep", "xgboostFit", "tuneXGBoost"),
+          omitArgs = "nthreads")
 
   ## subset predictor data
   datPreds <- dat[, ..colnamesPred]
@@ -120,7 +128,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                              , y = dat[[colnamesResp]][allDataIDs]
                              , interaction_constraints = interaction_constraints
                              # , objective = "reg:tweedie" ## no improvements
-                             , nthread = 10
+                             , nthread = nthreads
                              , eval_set = testIDs,
                              , monitor_training = TRUE
                              , eval_metric = eval_metric,
@@ -161,7 +169,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
             Cache(cachePath = cachePath, 
                   omitArgs = formalArgs(shap.values),
                   .functionName = .functionNameHelper("shap.values", "xgboost", kFold),
-                  .cacheExtra = c(dig, dig2, cols2keep))
+                  .cacheExtra = c(dig, dig2, cols2keep),
+                  userTags = c("gmcsDataPrep", "xgboostFit", "shap"))
           meanSHAP <- shap_values$mean_shap_score
           
           if (calcThresh) {
@@ -187,7 +196,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
           Cache(cachePath = cachePath,
                 omitArgs = formalArgs(shap.prep),
                 .functionName = .functionNameHelper("shap.prep", kFold),
-                .cacheExtra = c(dig, dig2, cols2keep))
+                .cacheExtra = c(dig, dig2, cols2keep),
+                userTags = c("gmcsDataPrep", "xgboostFit", "shap"))
 
         list(valData = valData,
              mod = modOut,
@@ -216,7 +226,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
 #' @importFrom caret trainControl train caretTheme
 #' @importFrom reproducible Cache
 #' @importFrom lattice trellis.par.set
-.tunexgboost <- function(dig, dat, colnamesResp, figDir, cachePath) {
+.tunexgboost <- function(dig, dat, colnamesResp, figDir, cachePath, nthreads = 1L) {
   ## use devtools::load_all("C:/Users/cbarros/GitHub/caret/pkg/caret/")
   ## bug reported at: https://github.com/topepo/caret/issues/1412
   savePlot <- FALSE
@@ -244,7 +254,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
     verboseIter = TRUE,
     returnData = FALSE,
     returnResamp = "final",
-    allowParallel = TRUE,
+    ## threads are set via `nthread` (passed to xgboost); a foreach backend on top would nest parallelism
+    allowParallel = FALSE,
     savePredictions = "final"
   )
   message(cyan("Tuning learning rate..."))
@@ -255,8 +266,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
         data = as.data.frame(dat[, ..colnamesPred]),
         trControl = xgb_trcontrol,
         tuneGrid = param_grid1,
-        
-        method = "xgbTree"
+        method = "xgbTree",
+        nthread = nthreads
       ) 
     }
   )
@@ -292,7 +303,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                          y = dat[[colnamesResp]],
                          trControl = xgb_trcontrol,
                          tuneGrid = param_grid2,
-                         method = "xgbTree"
+                         method = "xgbTree",
+                         nthread = nthreads
       )
     }
   )
@@ -327,7 +339,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                          y = dat[[colnamesResp]],
                          trControl = xgb_trcontrol,
                          tuneGrid = param_grid3,
-                         method = "xgbTree"
+                         method = "xgbTree",
+                         nthread = nthreads
       )
     }
   )
@@ -348,6 +361,44 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   
   for (i in 1:3) gc(reset = TRUE)
   return(paramsF)
+}
+
+#' Default number of threads for `xgboost`
+#'
+#' `xgboost` uses every core unless told otherwise. This uses a fraction of the cores that are
+#' currently free (available cores less the current 1-minute load), so that other users or processes
+#' sharing the machine are not starved. Where the load is unknown (e.g., Windows), one core is
+#' assumed to be busy.
+#'
+#' @param fraction fraction of the currently free cores to use.
+#' @return an integer >= 1.
+#' @importFrom parallelly availableCores
+#' @keywords internal
+.defaultThreads <- function(fraction = 0.5) {
+  avail <- parallelly::availableCores()
+  load1 <- suppressWarnings(tryCatch(
+    as.numeric(strsplit(readLines("/proc/loadavg", n = 1L), " ")[[1]][1]),
+    error = function(e) NA_real_))
+  busy <- if (is.na(load1)) 1 else ceiling(load1)
+  max(1L, as.integer(floor((avail - busy) * fraction)))
+}
+
+#' Resolve the `nthreads` parameter
+#'
+#' @param nthreads `NULL`/`NA` for the default (see `.defaultThreads()`), or a number of threads.
+#' @return an integer >= 1.
+#' @keywords internal
+.resolveThreads <- function(nthreads = NULL) {
+  if (is.null(nthreads) || length(nthreads) != 1L || is.na(nthreads)) {
+    nthreads <- .defaultThreads()
+    message("gmcsDataPrep: using ", nthreads, " thread(s) for xgboost (default; set the `nthreads` parameter to change)")
+  } else {
+    nthreads <- max(1L, as.integer(nthreads))
+    avail <- parallelly::availableCores()
+    if (nthreads > avail)
+      warning("nthreads (", nthreads, ") is more than the cores available (", avail, ")", call. = FALSE)
+  }
+  nthreads
 }
 
 .functionNameHelper <- function(..., sep = "_") {

@@ -13,8 +13,9 @@ defineModule(sim, list(
   citation = list("citation.bib"),
   documentation = list("README.txt", "gmcsDataPrep.Rmd"),
   reqdPkgs = list("crayon", "data.table", "ggplot2", "lightgbm",
-                  "purrr", "pROC", "sf", "xgboost (>= 3.0.5.1)",
-                  # "ceresbarros/caret@master/pkg/caret",
+                  "parallelly", "purrr", "pROC", "sf", "xgboost (>= 3.0.5.1)",
+                  # fork of caret that works with xgboost >= 3.0.5.1; revisit if topepo/caret#1412 is fixed upstream
+                  "ceresbarros/caret/pkg/caret",
                   #maybe install.packages('xgboost', repos = c('https://dmlc.r-universe.dev', 'https://cloud.r-project.org'))
                   "PredictiveEcology/LandR@development (>= 1.1.4)",
                   "ianmseddy/LandR.CS@development (>= 0.0.3.9000)",
@@ -27,11 +28,6 @@ defineModule(sim, list(
     defineParameter("biomassModel", "character", "Lambert2005", NA, NA,
                     desc =  paste("The model used to calculate biomass from DBH.",
                                   "Can be either 'Lambert2005' or 'Ung2008'.")),
-    defineParameter("climateVariables", "character", c("ATA" = "MAT", "CMI"), NA, NA,
-                    desc = paste("character vector of climate variables from ClimateNA used in the growth/mortality models.",
-                                 "If a model uses a variable formula that represents a deviation from a climate normal,",
-                                 "it should be indicated with a name, where the name represents the variable in the formula.",
-                                 "For example, the default climate variable and model use the anomaly of `MAT`: `ATA`.")),
     defineParameter("climateNormal", "numeric", c(1991:2020), NA, NA,
                     desc = paste("length 2 numeric denoting the first and last years to use when calculating anomaly variables.",
                                  "This date range should match the data used to estimate maxANPP and maxB, if applicable.")),
@@ -40,6 +36,11 @@ defineModule(sim, list(
                     desc = "assertions used to check climate data for NA values in valid pixels"),
     defineParameter("doPlotting", "logical", TRUE, NA, NA, 
                     desc = paste("if true, will plot and save models")),
+    defineParameter("nthreads", "numeric", NA, 1, NA,
+                    desc = paste("Number of CPU threads used by xgboost when tuning (via caret) and fitting the growth and",
+                                 "mortality models. `NA` (the default) uses half of the cores that are currently free",
+                                 "(available cores less the current load, minimum 1), so other users of the machine are",
+                                 "not starved. Changing it does not invalidate the cached models.")),
     defineParameter("growthKFolds", "numeric", 5, 0, Inf, 
                     desc = paste("number of K-folds applied to xgBoost climate-sensetive growth model")),
     defineParameter("maxDBHperYear", "numeric", 1, 0, Inf, 
@@ -251,6 +252,8 @@ Init <- function(sim) {
     checkPath(mDir, create = TRUE)
 
     ## model building
+    nthreads <- .resolveThreads(P(sim)$nthreads)
+
     ## only replace the models if NULL, so user can supply their own models
     if (is.null(sim$gcsModel)) {
 
@@ -265,8 +268,9 @@ Init <- function(sim) {
                                  eval_metric = c("rmse"),
                                  colnamesResp = "logGrowth",
                                  figDir = gDir,
-                                 cachePath = cachePath(sim)) |>
-        Cache()
+                                 cachePath = cachePath(sim),
+                                 nthreads = nthreads) |>
+        Cache(userTags = c("gmcsDataPrep", "xgboostFit", "growthModel"), omitArgs = "nthreads")
       # compute mean R² across folds, save to simList
       ggGrowth <- lapply(sim$gcsModel, function(x){x$valData}) |> data.table::rbindlist()
       ggGrowth[, obs := exp(obs)]
@@ -292,8 +296,9 @@ Init <- function(sim) {
                                  eval_metric = c("rmse"),
                                  colnamesResp = "mortality",
                                  figDir = mDir,
-                                 cachePath = cachePath(sim)) |>
-        Cache()
+                                 cachePath = cachePath(sim),
+                                 nthreads = nthreads) |>
+        Cache(userTags = c("gmcsDataPrep", "xgboostFit", "mortalityModel"), omitArgs = "nthreads")
 
       # compute mean R² across folds, save to simList
       ggMortality <- lapply(sim$mcsModel, function(x){x$valData}) |> data.table::rbindlist()
