@@ -45,16 +45,22 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   
   dat <- as.data.table(dat)
   
-  colnamesPred <- setdiff(colnames(dat), colnamesResp) ## after model.matrix bcs colnames change
+  ## a year column only orders the time-ordered folds below; it is dropped, so it is not a predictor
+  yearColname <- grep("year", colnames(dat), ignore.case = TRUE, value = TRUE)
+  colnamesPred <- setdiff(colnames(dat), c(colnamesResp, yearColname)) ## after model.matrix bcs colnames change
   
   ## Setup k-folds -----
-  savedSeed <- .Random.seed
-  on.exit(assign(".Random.seed", savedSeed, envir = .GlobalEnv), add = TRUE)
+  ## leave the random number generator as it was found: .Random.seed exists only once it is used
+  if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    savedSeed <- get(".Random.seed", envir = .GlobalEnv)
+    on.exit(assign(".Random.seed", savedSeed, envir = .GlobalEnv), add = TRUE)
+  } else {
+    on.exit(rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+  }
   set.seed(12345) # so kfolds are same, so Caching works correctly below; if dat changes number of rows,
   # it will be a totally different sequence; but it will be the same sequence
   # if number of rows doesn't change
   
-  yearColname <- grep("year", tolower(colnames(dat)), value = TRUE)
   indexNames <- c("allData", "evalData")
   
   if (length(yearColname)) {
@@ -120,7 +126,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                              , interaction_constraints = interaction_constraints
                              # , objective = "reg:tweedie" ## no improvements
                              , nthread = 10
-                             , eval_set = testIDs,
+                             ## rows of `x`, not of `dat`: time-ordered folds train on a subset
+                             , eval_set = match(testIDs, allDataIDs),
                              , monitor_training = TRUE
                              , eval_metric = eval_metric,
                              , early_stopping_rounds = 100
