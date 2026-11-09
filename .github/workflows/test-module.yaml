@@ -51,6 +51,7 @@ jobs:
             any::data.table
             any::ggplot2
             any::lattice
+            any::parallelly
             any::pROC
             any::purrr
             any::xgboost
