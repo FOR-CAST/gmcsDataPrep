@@ -7,7 +7,7 @@ defineModule(sim, list(
     person(c("Alex", "M"), "Chubaty", email = "achubaty@for-cast.ca", role = "ctb")
   ),
   childModules = character(0),
-  version = list(gmcsDataPrep = "0.0.2.9001"),
+  version = list(gmcsDataPrep = "0.0.2.9002"),
   timeframe = as.POSIXlt(c(NA, NA)),
   timeunit = "year",
   citation = list("citation.bib"),
@@ -23,7 +23,8 @@ defineModule(sim, list(
                   "PredictiveEcology/reproducible (>= 2.1.0)",
                   "PredictiveEcology/pemisc@development (>= 0.0.4.9015)",
                   "ianmseddy/PSPclean@development (>= 1.0.0.9006)",
-                  "PredictiveEcology/SHAPforxgboost (>= 0.1.3.9001)"),
+                  "PredictiveEcology/SHAPforxgboost (>= 0.1.3.9001)",
+                  "SpaDES.core (>= 2.0.3)"),  ## figurePath()
   parameters = rbind(
     #defineParameter("paramName", "paramClass", value, min, max, "parameter description"),
     defineParameter("biomassModel", "character", "Lambert2005", NA, NA,
@@ -246,10 +247,10 @@ Init <- function(sim) {
 
     colnamesPred <- setdiff(colnames(PSPmodelData), "logGrowth") ## after model.matrix bcs colnames change
 
-    # module-safe figure directories
-    gDir <- file.path(outputPath(sim), "figures", "gmcsDataPrep", "growth")
+    ## figure directories, under the one SpaDES.core gives this module (issue #3)
+    gDir <- file.path(figurePath(sim), "growth")
     checkPath(gDir, create = TRUE)
-    mDir <- file.path(outputPath(sim), "figures", "gmcsDataPrep", "mortality")
+    mDir <- file.path(figurePath(sim), "mortality")
     checkPath(mDir, create = TRUE)
 
     ## model building
@@ -339,8 +340,7 @@ Init <- function(sim) {
     #Diagnostic Plotting
     if (P(sim)$doPlotting) {
 
-      plotDir <- file.path(outputPath(sim), "figures", "gmcsDataPrep")
-      checkPath(plotDir, create = TRUE)
+      plotDir <- figurePath(sim)
 
       pGrowthVal <- ggplot(ggGrowth, aes(x = obs, y = pred)) +
         geom_bin2d() +
