@@ -7,16 +7,17 @@ defineModule(sim, list(
     person(c("Alex", "M"), "Chubaty", email = "achubaty@for-cast.ca", role = "ctb")
   ),
   childModules = character(0),
-  version = list(gmcsDataPrep = "0.0.2.9002"),
+  version = list(gmcsDataPrep = "0.0.2.9003"),
   timeframe = as.POSIXlt(c(NA, NA)),
   timeunit = "year",
   citation = list("citation.bib"),
-  documentation = list("README.txt", "gmcsDataPrep.Rmd"),
-  reqdPkgs = list("crayon", "data.table", "ggplot2", "lattice", "lightgbm",
-                  "parallelly", "purrr", "pROC", "sf", "xgboost (>= 3.0.5.1)",
+  documentation = list("README.md", "gmcsDataPrep.Rmd"),
+  reqdPkgs = list("crayon", "data.table", "ggplot2", "lattice",
+                  "parallelly", "purrr", "sf", "xgboost (>= 3.0.5.1)",
                   ## caret's xgboost 3.x support is on GitHub, not yet on CRAN: topepo/caret#1543
-                  ## fixed #1412 there, so the ceresbarros fork is no longer needed
-                  "topepo/caret",
+                  ## fixed #1412 there, so the ceresbarros fork is no longer needed. Pinned to a
+                  ## commit, since GitHub and CRAN caret are both 7.0-1.
+                  "topepo/caret@ab5687833ff1094b73e69003a98043454d16aa25",
                   #maybe install.packages('xgboost', repos = c('https://dmlc.r-universe.dev', 'https://cloud.r-project.org'))
                   "PredictiveEcology/LandR@development (>= 1.1.4)",
                   "ianmseddy/LandR.CS@development (>= 0.0.3.9000)",
@@ -31,7 +32,7 @@ defineModule(sim, list(
                     desc =  paste("The model used to calculate biomass from DBH.",
                                   "Can be either 'Lambert2005' or 'Ung2008'.")),
     defineParameter("climateNormal", "numeric", c(1991:2020), NA, NA,
-                    desc = paste("length 2 numeric denoting the first and last years to use when calculating anomaly variables.",
+                    desc = paste("the years of the climate normal used when calculating anomaly variables (only the first and last are used).",
                                  "This date range should match the data used to estimate maxANPP and maxB, if applicable.")),
     #TODO: review this parameter once the climate normal data is avaiable for PSPs (currently only 2001-2020 via climr)
     defineParameter("doAssertion", "logical", getOption("LandR.assertions"), NA, NA,
@@ -43,7 +44,7 @@ defineModule(sim, list(
                                  "mortality models. `NA` (the default) uses half of the cores that are currently free",
                                  "(available cores less the current load, minimum 1), so other users of the machine are",
                                  "not starved. Changing it does not invalidate the cached models.")),
-    defineParameter("growthKFolds", "numeric", 5, 0, Inf, 
+    defineParameter("growthKFolds", "numeric", 5, 2, Inf,
                     desc = paste("number of K-folds applied to xgBoost climate-sensetive growth model")),
     defineParameter("maxDBHperYear", "numeric", 1, 0, Inf, 
                     paste("Q/C parameter dictating maximum expected increase in DBH per year for newly measured trees,", 
@@ -70,7 +71,7 @@ defineModule(sim, list(
     defineParameter("minSize", "numeric", 0.02, 0, NA,
                     desc = paste("The minimum size (in hectares) of growth plot. All metrics are adjusted for area.",
                                  "The canonical methodology did not force a minimum size but the minimum size was 0.04 ha.")),
-    defineParameter("mortalityKFolds", "numeric", 5, 0, Inf, desc = paste("number of K-folds applied to xgBoost climate-sensetive mortality model")),
+    defineParameter("mortalityKFolds", "numeric", 5, 2, Inf, desc = paste("number of K-folds applied to xgBoost climate-sensetive mortality model")),
     defineParameter("PSPdataTypes", "character", "all", NA, NA,
                     desc = paste("Which PSP datasets to source, defaulting to all. Other available options include",
                                  "'BC', 'AB', 'SK', 'NFI', 'ON', 'NB', and 'dummy'. 'dummy' is for unauthorized users.")),
@@ -110,11 +111,24 @@ defineModule(sim, list(
   ),
   inputObjects = bindrows(
     #expectsInput("objectName", "objectClass", "input object description", sourceURL, ...),
+    expectsInput(objectName = "climateVariablesForGMCS", objectClass = "character",
+                 desc = paste("Required (no default). The ClimateNA variables in the growth and mortality models.",
+                              "A variable that is a deviation from the climate normal is named, the name being the",
+                              "variable in the model, e.g. `c(ATA = \"MAT\", \"CMI\")` uses the anomaly of `MAT` as `ATA`."),
+                 sourceURL = NA),
+    expectsInput(objectName = "gcsModel", objectClass = "list",
+                 desc = paste("Optional: a fitted growth model (as created by this module). If supplied, the models",
+                              "are not fitted again; supply `mcsModel` too."),
+                 sourceURL = NA),
+    expectsInput(objectName = "mcsModel", objectClass = "list",
+                 desc = paste("Optional: a fitted mortality model (as created by this module). If supplied, the models",
+                              "are not fitted again; supply `gcsModel` too."),
+                 sourceURL = NA),
     expectsInput(objectName = "PSPmeasure_gmcs", objectClass = "data.table", desc = "standardized tree measurements for PSPs",
                  sourceURL = "https://drive.google.com/file/d/1LmOaEtCZ6EBeIlAm6ttfLqBqQnQu4Ca7/"),
     expectsInput(objectName = "PSPplot_gmcs", objectClass = "data.table", desc = "standardized plot-level attributes for PSPs",
                  sourceURL = "https://drive.google.com/file/d/1LmOaEtCZ6EBeIlAm6ttfLqBqQnQu4Ca7/"),
-    expectsInput(objectName = "PSPgis_gmcs", objectClass = "data.table", desc = "PSP plot data as sf object",
+    expectsInput(objectName = "PSPgis_gmcs", objectClass = "sf", desc = "PSP plot data as sf object",
                  sourceURL = "https://drive.google.com/file/d/1LmOaEtCZ6EBeIlAm6ttfLqBqQnQu4Ca7/"),
     expectsInput(objectName = "PSPclimData", objectClass = "data.table",
                  desc = paste("climate data for each PSP from ClimateNA. Temp is represented in degrees Celsius.",
@@ -123,8 +137,6 @@ defineModule(sim, list(
     expectsInput(objectName = "studyAreaPSP", objectClass = "SpatVector",
                  desc = paste("Optional area used to subset PSP plots before building the statistical models.",
                               "Any class of spatial object is acceptable."), sourceURL = NA),
-    expectsInput(objectName = "sppEquiv", objectClass = "data.table",
-                 desc = "Table of species equivalencies. See `LandR::sppEquivalencies_CA`"),
     expectsInput("sppEquiv", "data.table",
                  desc = paste("table of species equivalencies - see `?LandR::sppEquivalencies_CA`",
                               "unique observations of <sppEquivCol> will be included as in the climate-sensitive model",
@@ -141,6 +153,14 @@ defineModule(sim, list(
                   desc = "growth model with covariates indicated by sim$climateVariablesForGMCS, biomass, and log(age)"),
     createsOutput(objectName = "mcsModel", objectClass = "list",
                   desc = "mortality model with covariates indicated by sim$climateVariablesForGMCS, biomass, and log(age)"),
+    createsOutput(objectName = "gcsModel_r2", objectClass = "numeric",
+                  desc = "R-squared of the growth model's predictions for the held-out folds, pooled"),
+    createsOutput(objectName = "mcsModel_r2", objectClass = "numeric",
+                  desc = "R-squared of the mortality model's predictions for the held-out folds, pooled"),
+    createsOutput(objectName = "PSPmeasure_gmcs", objectClass = "data.table",
+                  desc = "the input, with species names standardized by `sppEquivCol` and an `SpBiomassEq` column"),
+    createsOutput(objectName = "PSPplot_gmcs", objectClass = "data.table",
+                  desc = "the input, with a numeric plot id (`plotNumeric`)"),
     createsOutput(objectName = "PSPmodelData", objectClass = "data.table",
                   desc = "PSP growth mortality calculations"),
     createsOutput(objectName = "gcsShapScores", objectClass = "data.table",
@@ -868,11 +888,6 @@ r2Fun <- function(x) {
     sim$PSPmeasure_gmcs <- PSPdata$PSPmeasure
     sim$PSPplot_gmcs <- PSPdata$PSPplot
     sim$PSPgis_gmcs <- PSPdata$PSPgis
-  }
-
-  if (!suppliedElsewhere("studyArea", sim)) {
-    message("studyArea not supplied. Using a random area in Alberta")
-    sim$studyArea <- randomStudyArea(size = 1e6*50)
   }
 
   if (!suppliedElsewhere("PSPclimData", sim)) {

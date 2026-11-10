@@ -29,7 +29,6 @@
 #'   * `shap_values`: SHAP values for the fitted model
 #'   * `shap_long`: long version of the SHAP values for the fitted model (used for plotting)
 #' @importFrom purrr pmap
-#' @importFrom pROC roc
 #' @importFrom crayon cyan
 #' @importFrom SHAPforxgboost shap.values
 #' @importFrom reproducible Cache
