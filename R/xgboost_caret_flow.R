@@ -366,19 +366,31 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   return(paramsF)
 }
 
-#' Default number of threads for `xgboost`
+#' Cores available for `xgboost`'s threads
 #'
-#' `xgboost` uses every core unless told otherwise. This uses a fraction of the cores that are
-#' currently free (available cores less the current 1-minute load), so that other users or processes
-#' sharing the machine are not starved. Where the load is unknown (e.g., Windows), one core is
-#' assumed to be busy.
+#' `parallelly::availableCores()` with its "connections" constraint: it follows `mc.cores` /
+#' `MC_CORES` and cgroup or job-scheduler limits, and never exceeds R's free connections (about 125
+#' by default), which a machine with more cores than that would otherwise do.
 #'
-#' @param fraction fraction of the currently free cores to use.
 #' @return an integer >= 1.
 #' @importFrom parallelly availableCores
 #' @keywords internal
+.availableThreads <- function() {
+  as.integer(parallelly::availableCores(constraints = "connections"))
+}
+
+#' Default number of threads for `xgboost`
+#'
+#' `xgboost` uses every core unless told otherwise. This uses a fraction of the cores that are
+#' currently free (available cores, see `.availableThreads()`, less the current 1-minute load), so
+#' that other users or processes sharing the machine are not starved. Where the load is unknown
+#' (e.g., Windows), one core is assumed to be busy.
+#'
+#' @param fraction fraction of the currently free cores to use.
+#' @return an integer >= 1.
+#' @keywords internal
 .defaultThreads <- function(fraction = 0.5) {
-  avail <- parallelly::availableCores()
+  avail <- .availableThreads()
   load1 <- suppressWarnings(tryCatch(
     as.numeric(strsplit(readLines("/proc/loadavg", n = 1L), " ")[[1]][1]),
     error = function(e) NA_real_))
@@ -388,7 +400,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
 
 #' Resolve the `nthreads` parameter
 #'
-#' @param nthreads `NULL`/`NA` for the default (see `.defaultThreads()`), or a number of threads.
+#' @param nthreads `NULL`/`NA` for the default (see `.defaultThreads()`), or a number of threads;
+#'   a number above the cores available (see `.availableThreads()`) is reduced to it.
 #' @return an integer >= 1.
 #' @keywords internal
 .resolveThreads <- function(nthreads = NULL) {
@@ -397,9 +410,12 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
     message("gmcsDataPrep: using ", nthreads, " thread(s) for xgboost (default; set the `nthreads` parameter to change)")
   } else {
     nthreads <- max(1L, as.integer(nthreads))
-    avail <- parallelly::availableCores()
-    if (nthreads > avail)
-      warning("nthreads (", nthreads, ") is more than the cores available (", avail, ")", call. = FALSE)
+    avail <- .availableThreads()
+    if (nthreads > avail) {
+      message("gmcsDataPrep: nthreads (", nthreads, ") is more than the cores available (", avail,
+              "); using ", avail)
+      nthreads <- avail
+    }
   }
   nthreads
 }
