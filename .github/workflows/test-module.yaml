@@ -1,0 +1,67 @@
+## Run this module's unit tests (tests/testthat) with tests/run-tests.R. The tests source the helpers
+## in R/ and fit small models on made-up data, so only the packages those helpers and tests call are
+## installed: not SpaDES.core, and not the module's full reqdPkgs. The GitHub packages are pinned to
+## the SHAs in YT_caribou's renv.lock (bump them in sync with the project lockfile); caret is
+## installed from GitHub for its xgboost 3.x support (topepo/caret#1543), which CRAN's 7.0-1 lacks.
+name: Module tests
+
+on:
+  push:
+    branches:
+      - master
+      - development
+    paths:
+      - .github/workflows/test-module.yaml
+      - gmcsDataPrep.R
+      - R/**
+      - tests/**
+  pull_request:
+    branches:
+      - master
+      - development
+    paths:
+      - .github/workflows/test-module.yaml
+      - gmcsDataPrep.R
+      - R/**
+      - tests/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Module tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::testthat
+            any::withr
+            any::crayon
+            any::data.table
+            any::ggplot2
+            any::lattice
+            any::parallelly
+            any::pROC
+            any::purrr
+            any::xgboost
+            github::topepo/caret@ab5687833ff1094b73e69003a98043454d16aa25
+            github::PredictiveEcology/SHAPforxgboost@c7283f152c85cf6dd7eb7b53735992189b956c67
+            github::PredictiveEcology/reproducible@039357e9e9cf2e8c8db2d73cfca7420ab34f5b91
+
+      - name: Run tests
+        run: Rscript tests/run-tests.R
+        env:
+          ## at most 2 cores, as CRAN asks (tests/run-tests.R also enforces it)
+          OMP_THREAD_LIMIT: 2
+          OMP_NUM_THREADS: 2

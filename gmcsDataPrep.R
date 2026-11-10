@@ -7,15 +7,16 @@ defineModule(sim, list(
     person(c("Alex", "M"), "Chubaty", email = "achubaty@for-cast.ca", role = "ctb")
   ),
   childModules = character(0),
-  version = list(gmcsDataPrep = "0.0.2.9000"),
+  version = list(gmcsDataPrep = "0.0.2.9001"),
   timeframe = as.POSIXlt(c(NA, NA)),
   timeunit = "year",
   citation = list("citation.bib"),
   documentation = list("README.txt", "gmcsDataPrep.Rmd"),
-  reqdPkgs = list("crayon", "data.table", "ggplot2", "lightgbm",
+  reqdPkgs = list("crayon", "data.table", "ggplot2", "lattice", "lightgbm",
                   "parallelly", "purrr", "pROC", "sf", "xgboost (>= 3.0.5.1)",
-                  # fork of caret that works with xgboost >= 3.0.5.1; revisit if topepo/caret#1412 is fixed upstream
-                  "ceresbarros/caret/pkg/caret",
+                  ## caret's xgboost 3.x support is on GitHub, not yet on CRAN: topepo/caret#1543
+                  ## fixed #1412 there, so the ceresbarros fork is no longer needed
+                  "topepo/caret",
                   #maybe install.packages('xgboost', repos = c('https://dmlc.r-universe.dev', 'https://cloud.r-project.org'))
                   "PredictiveEcology/LandR@development (>= 1.1.4)",
                   "ianmseddy/LandR.CS@development (>= 0.0.3.9000)",

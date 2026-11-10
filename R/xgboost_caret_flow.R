@@ -28,7 +28,6 @@
 #'   * `$mod`: fitted model
 #'   * `shap_values`: SHAP values for the fitted model
 #'   * `shap_long`: long version of the SHAP values for the fitted model (used for plotting)
-#' @importFrom caret createFolds
 #' @importFrom purrr pmap
 #' @importFrom pROC roc
 #' @importFrom crayon cyan
@@ -51,16 +50,22 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   
   dat <- as.data.table(dat)
   
-  colnamesPred <- setdiff(colnames(dat), colnamesResp) ## after model.matrix bcs colnames change
+  ## a year column only orders the time-ordered folds below; it is dropped, so it is not a predictor
+  yearColname <- grep("year", colnames(dat), ignore.case = TRUE, value = TRUE)
+  colnamesPred <- setdiff(colnames(dat), c(colnamesResp, yearColname)) ## after model.matrix bcs colnames change
   
   ## Setup k-folds -----
-  savedSeed <- .Random.seed
-  on.exit(assign(".Random.seed", savedSeed, envir = .GlobalEnv), add = TRUE)
+  ## leave the random number generator as it was found: .Random.seed exists only once it is used
+  if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    savedSeed <- get(".Random.seed", envir = .GlobalEnv)
+    on.exit(assign(".Random.seed", savedSeed, envir = .GlobalEnv), add = TRUE)
+  } else {
+    on.exit(rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+  }
   set.seed(12345) # so kfolds are same, so Caching works correctly below; if dat changes number of rows,
   # it will be a totally different sequence; but it will be the same sequence
   # if number of rows doesn't change
   
-  yearColname <- grep("year", tolower(colnames(dat)), value = TRUE)
   indexNames <- c("allData", "evalData")
   
   if (length(yearColname)) {
@@ -68,7 +73,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
     times <- unique(dat[[yearColname]])
     testLength <- 3
     initialWindow <- length(times) - testLength - nFolds + 1
-    trainIndexK <- createTimeSlices(times, initialWindow = initialWindow, testLength, fixedWindow = FALSE)
+    trainIndexK <- caret::createTimeSlices(times, initialWindow = initialWindow, testLength, fixedWindow = FALSE)
     trainIndexK <- Map(tr = trainIndexK$train, te = trainIndexK$test, function(tr, te) {
       allData <- which(dat[[yearColname]] %in% times[c(tr, te)])
       evalData <- which(dat[[yearColname]] %in% times[te])
@@ -77,7 +82,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   } else {
     crossValType <- "crossValidation"
     ## create folds and make a list with indices of full dataset and each fold
-    trainIndexK <- createFolds(dat[[colnamesResp]], k = nFolds, list = TRUE, returnTrain = FALSE)
+    trainIndexK <- caret::createFolds(dat[[colnamesResp]], k = nFolds, list = TRUE, returnTrain = FALSE)
     trainIndexK <- Map(tr = trainIndexK, function(tr) {
       list(seq(NROW(dat)), tr) |> setNames(indexNames)
     })
@@ -129,7 +134,8 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                              , interaction_constraints = interaction_constraints
                              # , objective = "reg:tweedie" ## no improvements
                              , nthread = nthreads
-                             , eval_set = testIDs,
+                             ## rows of `x`, not of `dat`: time-ordered folds train on a subset
+                             , eval_set = match(testIDs, allDataIDs),
                              , monitor_training = TRUE
                              , eval_metric = eval_metric,
                              , early_stopping_rounds = 100
@@ -223,12 +229,10 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
 #' @returns a data.frame of best parameter values.
 #'
 #' @inheritParams runXGBOOST
-#' @importFrom caret trainControl train caretTheme
 #' @importFrom reproducible Cache
-#' @importFrom lattice trellis.par.set
 .tunexgboost <- function(dig, dat, colnamesResp, figDir, cachePath, nthreads = 1L) {
-  ## use devtools::load_all("C:/Users/cbarros/GitHub/caret/pkg/caret/")
-  ## bug reported at: https://github.com/topepo/caret/issues/1412
+  ## needs caret with xgboost 3.x support (topepo/caret#1543, which fixed #1412): on GitHub, not
+  ## yet on CRAN
   savePlot <- FALSE
   if (!is.null(figDir)) {
     dir.create(figDir, showWarnings = FALSE, recursive = TRUE)
@@ -248,7 +252,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
                             min_child_weight = 1,
                             subsample = 1)
   
-  xgb_trcontrol <- trainControl(
+  xgb_trcontrol <- caret::trainControl(
     method = "cv",
     number = 5,
     verboseIter = TRUE,
@@ -279,7 +283,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   if (savePlot) {
     png(file.path(figDir, paste0(colnamesResp, "_tuning_learningRate.png")), height = 4, width = 6,
         units = "in", res = 300)
-    trellis.par.set(caretTheme())
+    lattice::trellis.par.set(caret::caretTheme())
     print(plot(xgb_tuned))
     dev.off()
   }
@@ -299,7 +303,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
 
   st <- system.time(
     {
-      xgb_tuned <- train(x = as.data.frame(dat[, ..colnamesPred]),
+      xgb_tuned <- caret::train(x = as.data.frame(dat[, ..colnamesPred]),
                          y = dat[[colnamesResp]],
                          trControl = xgb_trcontrol,
                          tuneGrid = param_grid2,
@@ -316,7 +320,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   if (savePlot) {
     png(file.path(figDir, paste0(colnamesResp, "_tuning_all.png")), height = 12, width = 12,
         units = "in", res = 300)
-    trellis.par.set(caretTheme())
+    lattice::trellis.par.set(caret::caretTheme())
     print(plot(xgb_tuned))
     dev.off()
   }
@@ -335,7 +339,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   message(cyan("Tuning no. rounds (trees)..."))
   st <- system.time(
     {
-      xgb_tuned <- train(x = as.data.frame(dat[, ..colnamesPred]),
+      xgb_tuned <- caret::train(x = as.data.frame(dat[, ..colnamesPred]),
                          y = dat[[colnamesResp]],
                          trControl = xgb_trcontrol,
                          tuneGrid = param_grid3,
@@ -354,7 +358,7 @@ runXGBOOST <- function(dat, dig = NULL, nFolds = 5, colnamesResp = "SEV_PROP",
   if (savePlot) {
     png(file.path(figDir, paste0(colnamesResp, "_tuning_nrounds.png")), height = 4, width = 6,
         units = "in", res = 300)
-    trellis.par.set(caretTheme())
+    lattice::trellis.par.set(caret::caretTheme())
     print(plot(xgb_tuned))
     dev.off()
   }
