@@ -102,3 +102,37 @@ test_that(".tunexgboost(): tunes in three steps and saves the three tuning plots
     paste0("logGrowth_tuning_", c("learningRate", "all", "nrounds"), ".png")
   )
 })
+
+## The thread count. parallelly::availableCores() follows `mc.cores` (tests/run-tests.R sets it to
+## the test cores), and its "connections" constraint keeps the count within R's free connections,
+## which a machine with more than ~125 cores would otherwise exceed.
+
+test_that("the test runner limits the cores parallelly reports to the test cores", {
+  expect_lte(parallelly::availableCores(), 4L)
+})
+
+test_that(".resolveThreads(): a request above the available cores is capped, with a message", {
+  withr::local_options(mc.cores = 2L)
+  expect_message(n <- .resolveThreads(64L), "64", fixed = TRUE)
+  expect_identical(n, 2L)
+})
+
+test_that(".resolveThreads(): a request within the available cores is kept", {
+  withr::local_options(mc.cores = 2L)
+  expect_identical(.resolveThreads(1L), 1L)
+})
+
+test_that(".defaultThreads() and .resolveThreads() count cores within R's free connections", {
+  asked <- list()
+  local_mocked_bindings(
+    availableCores = function(constraints = NULL, ...) {
+      asked[[length(asked) + 1L]] <<- constraints
+      8L
+    },
+    .package = "parallelly"
+  )
+  expect_lte(.defaultThreads(), 8L)
+  expect_identical(suppressMessages(.resolveThreads(16L)), 8L)
+  expect_identical(unique(unlist(asked)), "connections")
+  expect_length(asked, 2L)
+})

@@ -34,6 +34,8 @@ suppressPackageStartupMessages({
   library(xgboost)
 })
 data.table::setDTthreads(cores)
+## the module's thread count comes from parallelly::availableCores(), which follows mc.cores
+options(mc.cores = cores)
 for (f in list.files("R", "[.]R$", full.names = TRUE)) {
   source(f)
 }
