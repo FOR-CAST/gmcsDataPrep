@@ -10,27 +10,29 @@ editor_options:
   chunk_output_type: console
 ---
 
+# gmcsDataPrep Module
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = FALSE, warning = FALSE, results = "hold")
 ```
 
-# Overview
+## Overview
 
 This module uses climate data from climateNA and permanent sampling plot data to prepare climate-sensitive models of stand growth and mortality. The methodology is derived from research by Chen and Luo (2015); https://doi.org/10.1111/gcb.12994) and Luo et al. (2019; https://doi.org/10.1111/1365-2745.13033). The permanent sample plots are sourced, standardized, and treated by the package `ianmseddy/PSPclean`, with specific jurisdictions controlled via the parameter `PSPdataTypes`. The default is to retrieve data from every available jurisdiction, however file-sharing agreements are required to access some of the data. For users without these agreements, we recommend using `PSPdataTypes = "dummy"`, which retrieves pseudo-data, in the form of real plots that have been slightly randomized with respect to location and measurements. An alternative is using `PSPdataTypes = c("BC", "QC", "NB", "NFI")`, as these jurisdictions are freely available. A significant limitation of the methodology is that because of its reliance on  repeat measurements and the random effect of plot, a minimum of three measurements are needed for each plot (forming two observations of growth/mortality, 
 allowing for the estimation of the random effect), which drastically reduces the available data in some jurisdictions. 
 
 Climate data was acquired for every plot location using ClimateNA (Wang et al, 2016; doi:10.1371/journal.pone.0156720), sourcing every available climate metric (annual, seasonal, and monthly). When plot elevation was not available, it was estimated using a DEM and the plot location. This method was demonstrated to be significantly more accurate than the alternative of running ClimateNA without any elevation input. 
 
-#Model construction
+## Model construction
 The original models employed in the Chen and Luo papers were multivariate mixed-effect models of growth, mortality, and biomass. Due to the lack of a predict function associated with this type of statistical model, we instead used separate mixed effect models for growth and mortality. Originally these were linear mixed-effect models from nlme::lme4, however the default growthModel is a generalized linear mixed model via Penalized Quasi-Likelihood. Any statistical model can be passed - however there are some necessary steps: it must be wrapped in a `quote` call (and if using `SpaDES.project::setupProject`, added after the initial `setupProject` call, and the climate variables must be present in `sim$PSPclimateData` and specified in `P(sim)$climateVariables`. If using variables that are lagged or averaged over a period of time, it is recommended to use the module `ianmseddy/PSPclimate` to create the `PSPclimateData` object that is an input to this module.
 
-#Validation
+## Validation
 There are two built-in methods of validating models, both of which involve preserving a subset of the fitting data. Because the prediction requires 3 measurements, the validation dataset is composed only of plots for which four plots exist (producing three observations, at least two to fit the model and one to validate). The subset of data retained for validation can either be random or from a specific period (specified via `P(sim)$PSPvalidationPeriod`). The default is to use a random subset of observations. In either case, the climate-sensitive model will be tested against the relevant null model (e.g. `sim$nullGrowthModel`). These models are intended to be models without climatic covariates, however they could be different models entirely (i.e. different statistical form or covariates). If `P(sim)$doPlotting` is TRUE, separate plots of predicted vs. observed growth and mortality are made for both the NULL model and the climate-sensitive model. The sum of negative log-likelihood is computed and used to assess whether climate-sensitivity improved the fit. So far, in most cases, the climate-sensitive growth model has outperformed the NULL model in western Canada, but the mortality model has not. 
 
-#Additional information
+## Additional information
 When acquring the PSP data, specifically for BC, Alberta and the NFI, trees that were flagged as suffering damage, defoliation, or death from either mountain pine beetle or spruce budworm are removed from all prior measurements (via the param `damageTypesToExclude`). This ensures their mortality is not attributed directly to climatic factors. Lastly, the module does not estimate unobserved growth and mortality (trees that grew and died between census measurements). Prior work showed these estimates are typically in the range of 0.5-1.5% of total growth and mortality, so the omission is believed to be of minor significance.  
 
-#References
+## Literature cited
 - Chen, H. Y., & Luo, Y. (2015). Net aboveground biomass declines of four major forest types with forest ageing and climate change in western Canada's boreal forests. Global Change Biology, 21(10), 3675-3684.
 - Luo, Y., Chen, H. Y., McIntire, E. J., & Andison, D. W. (2019). Divergent temporal trends of net biomass change in western Canadian boreal forests. Journal of Ecology, 107(1), 69-78.
 - Wang T, Hamann A, Spittlehouse D, Carroll C (2016) Locally Downscaled and Spatially Customizable Climate Data for Historical and Future Periods for North America. PLoS ONE 11(6): e0156720. doi:10.1371/journal.pone.0156720
@@ -39,7 +41,7 @@ When acquring the PSP data, specifically for BC, Alberta and the NFI, trees that
 
 
 
-# Usage
+## Usage
 
 ```{r module_usage}
 library(SpaDES)
@@ -107,7 +109,7 @@ mySimOut <- spades(mySim)
 
 ```
 
-# Parameters
+## Parameters
 
 Provide a summary of user-visible parameters.
 
@@ -116,7 +118,7 @@ df_params <- SpaDES.core::moduleParams("gmcsDataPrep", "..")
 knitr::kable(df_params)
 ```
 
-# Events
+## Events
 
 - TODO
 
@@ -128,7 +130,7 @@ knitr::kable(df_params)
 
 - TODO
 
-# Data dependencies
+## Data dependencies
 
 ## Input data
 
@@ -154,6 +156,6 @@ df_outputs <- SpaDES.core::moduleOutputs("canClimateData", "..")
 knitr::kable(df_outputs)
 ```
 
-# Links to other modules
+## Links to other modules
 
 - [Biomass_core](https://github.com/PredictiveEcology/Biomass_core)
